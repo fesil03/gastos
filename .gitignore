@@ -1,0 +1,9 @@
+node_modules
+dist
+dev-dist
+*.local
+.DS_Store
+screenshots
+# personal data — the real Wallet export stays on the device (tests skip without it)
+fixtures/*.csv
+*.tsbuildinfo
