@@ -39,6 +39,7 @@ export const ENVELOPE_TO_GROUP: Record<number, GroupName> = {
   2008: 'Compras', // Papelaria, ferramentas
   2009: 'Vida & Lazer', // Tempo livre
   2011: 'Saúde', // Farmácia, drogaria
+  2012: 'Compras', // Compras (Wallet's generic Shopping category)
   3000: 'Vida & Lazer', // Hotel
   3002: 'Casa & Serviços', // Lavanderia
   3003: 'Casa & Serviços', // Serviços
@@ -48,6 +49,7 @@ export const ENVELOPE_TO_GROUP: Record<number, GroupName> = {
   4004: 'Transporte', // Transporte
   6000: 'Saúde', // Cuidados de saúde, médico
   6001: 'Saúde', // Bem-estar, beleza
+  6002: 'Vida & Lazer', // Esporte ativo, fitness
   6003: 'Vida & Lazer', // Cultura, eventos esportivos
   6004: 'Vida & Lazer', // Eventos de vida
   6005: 'Vida & Lazer', // Hobbies
@@ -57,6 +59,7 @@ export const ENVELOPE_TO_GROUP: Record<number, GroupName> = {
   6009: 'Vida & Lazer', // Férias, viagens, hotéis
   6010: 'Vida & Lazer', // Caridade, presentes
   6011: 'Vida & Lazer', // Álcool, tabaco
+  6012: 'Vida & Lazer', // Vida e entretenimento (Wallet's generic Life & entertainment category)
   7001: 'Contas & Taxas', // Telefone, celular
   7003: 'Contas & Taxas', // Software, aplicativos, jogos
   8005: 'Contas & Taxas', // Encargos, taxas

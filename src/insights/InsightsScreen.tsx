@@ -161,7 +161,14 @@ export function InsightsScreen() {
       <section>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Hora × dia{topUpIds.size > 0 && <span className="ml-1 font-normal normal-case tracking-normal text-slate-600">· sem top-ups</span>}
+            Hora × dia
+            {(heat.excludedTopUps > 0 || heat.excludedUnknownTime > 0) && (
+              <span className="ml-1 font-normal normal-case tracking-normal text-slate-600" data-testid="heat-excluded">
+                ·{heat.excludedTopUps > 0 && ' sem top-ups'}
+                {heat.excludedTopUps > 0 && heat.excludedUnknownTime > 0 && ' ·'}
+                {heat.excludedUnknownTime > 0 && ` ${heat.excludedUnknownTime} sem hora`}
+              </span>
+            )}
           </h2>
           <div className="flex overflow-hidden rounded-full bg-slate-900 text-[11px]">
             <button onClick={() => setHeatMode('count')} className={`px-2.5 py-1 ${heatMode === 'count' ? 'bg-slate-700 text-slate-100' : 'text-slate-400'}`}>

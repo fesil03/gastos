@@ -1,4 +1,5 @@
 import Papa from 'papaparse'
+import { isTimeUnknown } from '../db/types'
 
 // Wallet by BudgetBakers CSV — parsing primitives (spec §2, §6).
 // Semicolon-delimited, comma-decimal, quoted-field-safe. Never String.split.
@@ -16,6 +17,7 @@ export interface WalletRow {
   type: 'Despesas' | 'Receita' | string
   note?: string
   date: string // local naive ISO
+  timeUnknown: boolean // stamped inside the midnight minute = the source had no clock time
   envelopeId: number | null
   customCategory: boolean
 }
@@ -161,6 +163,7 @@ export function parseWalletCsv(text: string): { rows: WalletRow[]; errors: Parse
       type: (r.type ?? '').trim(),
       note: note || undefined,
       date,
+      timeUnknown: isTimeUnknown(date),
       envelopeId,
       customCategory: (r.custom_category ?? '').trim().toLowerCase() === 'true',
     })

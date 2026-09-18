@@ -11,15 +11,20 @@ interface Run {
   count: number
 }
 
-/** Consecutive suspected months collapse into one run — one row, one tap. */
+/**
+ * Consecutive suspected months collapse into one row with one tap — but ONLY when every month
+ * in the run is empty. A month that holds real transactions always stands on its own, because
+ * declaring it untracked hides spending that was actually logged, and that decision deserves
+ * its own deliberate tap rather than riding along with the empty months next to it.
+ */
 export function runsOf(months: MonthStat[]): Run[] {
   const runs: Run[] = []
   for (const m of months) {
     const last = runs[runs.length - 1]
-    if (last && addMonths(last.end, 1) === m.month) {
+    const mergeable = last != null && addMonths(last.end, 1) === m.month && last.count === 0 && m.count === 0
+    if (mergeable) {
       last.months.push(m)
       last.end = m.month
-      last.count += m.count
     } else runs.push({ months: [m], start: m.month, end: m.month, count: m.count })
   }
   return runs
@@ -59,7 +64,11 @@ export function CoveragePanel({ suspects, untracked, currentMonth }: Props) {
                   <span className="text-slate-500">
                     {' '}
                     · {r.count} lanç.
-                    {r.months.length === 1 && r.months[0].trailingMedianCount != null && ` · mediana ${Math.round(r.months[0].trailingMedianCount)}`}
+                    {r.months.length > 1
+                      ? ` · ${r.months.length} meses sem nada`
+                      : r.months[0].trailingMedianCount != null
+                        ? ` · mediana ${Math.round(r.months[0].trailingMedianCount)}`
+                        : ''}
                   </span>
                 </span>
                 <button
@@ -83,7 +92,7 @@ export function CoveragePanel({ suspects, untracked, currentMonth }: Props) {
             ))}
           </ul>
           {actionable.length > LIMIT && (
-            <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-1.5 text-[11px] text-slate-500 underline-offset-2 hover:underline">
+            <button type="button" data-testid="coverage-more" onClick={() => setShowAll((v) => !v)} className="mt-1.5 text-[11px] text-slate-500 underline-offset-2 hover:underline">
               {showAll ? 'menos' : `mais ${actionable.length - LIMIT}…`}
             </button>
           )}

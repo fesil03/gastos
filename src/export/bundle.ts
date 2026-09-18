@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import type { Category, Group, Tag, Transaction, UntrackedPeriod } from '../db/types'
-import { categoryBreakdown, monthlyStats } from '../insights/engine'
+import { categoryBreakdown, lacksTime, monthlyStats } from '../insights/engine'
 import { inRange } from '../insights/engine'
 
 // LLM export bundle — spec §9. One Markdown file, four sections, readable in a chat window.
@@ -49,7 +49,11 @@ export function buildMarkdownBundle(all: Transaction[], tax: ExportTaxonomy, opt
   lines.push('')
   lines.push(`- Personal expense log of one person; ${txs.length} transactions (${expenses.length} expenses, ${txs.length - expenses.length} income) from ${opts.fromDay} to ${opts.toDay}, generated ${opts.generatedAt.replace('T', ' ')}.`)
   lines.push(`- Amounts are signed decimals; negative = expense, positive = income. \`currency\` is the original currency (${currencies.join(', ')}); all rollups below are in the reference currency **${opts.refCurrency}**, converted at the rate stored when each transaction was logged.`)
-  lines.push(`- Dates are local wall-clock time where the transaction happened (ISO, no timezone). Hour-of-day is meaningful.`)
+  const noTime = txs.filter(lacksTime).length
+  lines.push(
+    `- Dates are local wall-clock time where the transaction happened (ISO, no timezone). Hour-of-day is meaningful` +
+      (noTime ? `, except for ${noTime} row${noTime === 1 ? '' : 's'} stamped inside the midnight minute (00:00:00–00:00:59), where the time was never recorded — use their dates but ignore their hour.` : '.'),
+  )
   lines.push(
     `- Taxonomy: each transaction has one \`category\` which belongs to one \`group\`; \`tags\` are optional, pipe-separated. Category names are in Portuguese.` +
       (topUps.length

@@ -18,7 +18,19 @@ export interface Transaction {
   unitPrice?: number
   source: TxSource
   externalHash?: string // import dedupe, spec §6
+  /**
+   * The row's clock time was never recorded (imported from a source that showed only the day).
+   * Such rows are stamped inside the midnight minute and are excluded from time-of-day analysis;
+   * they count normally everywhere else. No row in the 2023–2026 history falls in that minute —
+   * the earliest real timestamp is 00:02:49 — so the marker is unambiguous.
+   */
+  timeUnknown?: 0 | 1
   createdAt: string
+}
+
+/** True for a timestamp inside the midnight minute, the reserved "time not recorded" slot. */
+export function isTimeUnknown(iso: string): boolean {
+  return /T00:00:[0-5]\d/.test(iso)
 }
 
 export interface Group {

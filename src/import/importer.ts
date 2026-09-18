@@ -162,6 +162,7 @@ function toTransaction(r: WalletRow, categoryId: number, hash: string, createdAt
     externalHash: hash,
     createdAt,
   }
+  if (r.timeUnknown) tx.timeUnknown = 1
   if (r.note) tx.note = r.note
   if (structured.item) tx.item = structured.item
   if (structured.qty != null) tx.qty = structured.qty

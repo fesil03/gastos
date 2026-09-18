@@ -1,4 +1,4 @@
-import type { BalanceCheck, Category, Group, Transaction, UntrackedPeriod } from '../db/types'
+import { isTimeUnknown, type BalanceCheck, type Category, type Group, type Transaction, type UntrackedPeriod } from '../db/types'
 import { addMonths, dayKey, daysBetween, hourOf, monthBounds, monthKey, weekdayOf } from '../lib/dates'
 
 // Insights engine — spec §8. Pure, deterministic, integer arithmetic on refAmountMinor.
@@ -60,6 +60,15 @@ export function isDayUntracked(day: string, periods: UntrackedPeriod[] | undefin
 
 function exclude(txs: Transaction[], ids?: Set<number>): Transaction[] {
   return ids?.size ? txs.filter((t) => !ids.has(t.categoryId)) : txs
+}
+
+/**
+ * Whether a row's clock time is unknown. The stored flag is authoritative when present, but the
+ * midnight minute is also checked directly so rows imported by a build that predates the flag are
+ * still handled — the exclusion must not depend on which version happened to do the import.
+ */
+export function lacksTime(t: Transaction): boolean {
+  return t.timeUnknown === 1 || isTimeUnknown(t.date)
 }
 
 export function expenses(txs: Iterable<Transaction>): Transaction[] {
@@ -206,13 +215,29 @@ export function rollingDailyAverage(txs: Transaction[], days: number, today = da
   return Math.round(sum / trackedDays)
 }
 
-/** 7 weekdays (Mon..Sun) × 24 hours: count and total. Top-ups (`excludeIds`) are left out — a card load at 18:09 is not a dinner. */
-export function hourWeekdayHeatmap(txs: Transaction[], excludeIds?: Set<number>): { count: number[][]; totalMinor: number[][]; maxCount: number; maxTotal: number } {
+/**
+ * 7 weekdays (Mon..Sun) × 24 hours: count and total.
+ * Two kinds of row are left out, because both would answer the question the chart asks with
+ * something that is not an answer: top-ups (`excludeIds`) — a card load at 18:09 is not a
+ * dinner at 18:09 — and rows whose clock time was never recorded, which would otherwise pile
+ * up in whichever hour they were stamped with. Both still count in every total elsewhere.
+ */
+export function hourWeekdayHeatmap(
+  txs: Transaction[],
+  excludeIds?: Set<number>,
+): { count: number[][]; totalMinor: number[][]; maxCount: number; maxTotal: number; excludedTopUps: number; excludedUnknownTime: number } {
   const count = Array.from({ length: 7 }, () => Array<number>(24).fill(0))
   const totalMinor = Array.from({ length: 7 }, () => Array<number>(24).fill(0))
   let maxCount = 0
   let maxTotal = 0
-  for (const t of exclude(expenses(txs), excludeIds)) {
+  let excludedUnknownTime = 0
+  const exp = expenses(txs)
+  const kept = exclude(exp, excludeIds)
+  for (const t of kept) {
+    if (lacksTime(t)) {
+      excludedUnknownTime++
+      continue
+    }
     const w = weekdayOf(t.date)
     const h = hourOf(t.date)
     count[w][h]++
@@ -220,7 +245,7 @@ export function hourWeekdayHeatmap(txs: Transaction[], excludeIds?: Set<number>)
     if (count[w][h] > maxCount) maxCount = count[w][h]
     if (totalMinor[w][h] > maxTotal) maxTotal = totalMinor[w][h]
   }
-  return { count, totalMinor, maxCount, maxTotal }
+  return { count, totalMinor, maxCount, maxTotal, excludedTopUps: exp.length - kept.length, excludedUnknownTime }
 }
 
 export interface LeakageMonth {
