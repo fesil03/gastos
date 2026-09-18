@@ -7,7 +7,7 @@ Local-first personal expense tracker. Vite + React + TypeScript, Dexie (IndexedD
 ```
 npm install
 npm run dev        # http://localhost:5173
-npm test           # vitest: 61 tests incl. acceptance against the real export
+npm test           # vitest: 90 tests incl. acceptance against the real export
                    # (fixtures/*.csv is personal data and not committed — those suites skip without it)
 npm run build      # tsc -b && vite build → dist/  (root-path build)
 npm run build:pages   # same, for GitHub Pages at /gastos/
@@ -56,7 +56,8 @@ src/entry/       keypad · category chips (long-press) · picker · "mais" drawe
 src/list/        filter/group (pure) · ListScreen · EditSheet
 src/insights/    engine (pure, tested: coverage flavours, top-up exclusions, capture rate) · charts (hand-rolled SVG) · CoveragePanel · BalancePanel · InsightsScreen
 src/export/      bundle (Markdown/CSV) · backup (JSON, restore merge/replace) · deliver (share/download/copy) · ExportScreen
-src/settings/    SettingsScreen (ref currency, untracked periods, PWA status, import)
+src/settings/    SettingsScreen (ref currency, sync, untracked periods, PWA status, import)
+src/sync/        github (Contents API client) · snapshot (push/pull + the shrink guard) · autopush (debounced writer)
 src/pwa.ts       service-worker update, install prompt, storage persistence
 src/lib/         money (minor units ↔ display) · dates (naive local ISO)
 scripts/smoke.mjs  Playwright end-to-end (import → entry → list → insights → export → offline)
@@ -73,6 +74,32 @@ fixtures/        the real Wallet export — your data; git-ignored, lives only o
 ## Dedupe
 
 `externalHash = sha256(date|amountMinor|currency|category)`. For a hash with *m* copies in the DB and *k* in the file: copies 1..*m* are skipped, the next is imported, further copies are held as *collisions* for review. Accepting collisions imports them; running the same file again afterwards is still a no-op.
+
+## Sincronização (um sentido só)
+
+Entries are made on the phone, so the phone is the only writer. It pushes a full JSON snapshot to
+a **private** GitHub repo; every other device pulls that snapshot and replaces its local database
+with it. There is no merge and no conflict resolution, because with a single writer there is
+nothing to merge — which is why this needs no global ids, no `updatedAt` and no tombstones.
+
+The cost, stated plainly: **a change made on a device that only pulls is lost at the next pull.**
+That is the trade accepted in exchange for the whole feature being ~300 lines instead of a
+distributed-systems problem. If entries ever start happening on two devices, this design has to be
+replaced rather than extended.
+
+Two asymmetries keep it safe:
+
+- **Sending is automatic, fetching is manual.** A push can only add a version to the repo, so it
+  runs on a 20-second debounce after any change (and on app open, on going online, and when the
+  app is backgrounded). A pull destroys local data, so it always asks first.
+- **A push that would shrink the snapshot is refused.** If the repo holds more transactions than
+  this device, the push stops and explains — this is the laptop-clobbers-phone accident, and it is
+  the one failure mode that would silently lose real data. Overriding it takes a second, explicit tap.
+
+Setup: create a private repo, then a **fine-grained** PAT limited to that one repo with
+`Contents: read and write`. Ajustes → Sincronização. The token is stored in IndexedDB on the
+device in plain text, like any app that keeps a session — scope it narrowly and revoke it if the
+device is lost. The snapshot itself is not encrypted; it relies on the repo being private.
 
 ## Coverage & top-ups (spec §3, §8)
 

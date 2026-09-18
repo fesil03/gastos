@@ -29,7 +29,13 @@ const errors = []
 const hosts = new Set()
 page.on('request', (r) => hosts.add(new URL(r.url()).host))
 page.on('pageerror', (e) => errors.push(e.message))
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
+page.on('console', (m) => {
+  if (m.type() !== 'error') return
+  // A 404 from the contents API is how "no snapshot in the repo yet" is detected; the code
+  // handles it, but the browser still logs the failed fetch. Ignore only that one source.
+  if (/api\.github\.com/.test(m.location()?.url ?? '')) return
+  errors.push(m.text())
+})
 
 let failures = 0
 const check = (name, ok, detail = '') => { console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`); if (!ok) failures++ }
@@ -317,6 +323,97 @@ await page.waitForSelector('[data-testid=insights-screen]')
 check('P6 insights offline', (await page.$$('[data-testid=heatmap] rect')).length === 168)
 await shot('p6-offline')
 await ctx.setOffline(false)
+
+
+// ---------- Phase 7: sync (GitHub API stubbed in the browser context) ----------
+let fakeRepo = null            // { text, sha }
+let repoPrivate = true
+let putCount = 0
+await ctx.route('https://api.github.com/**', async (route) => {
+  const req = route.request()
+  const url = new URL(req.url())
+  const method = req.method()
+  const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+  if (!/\/contents\//.test(url.pathname)) return json(200, { private: repoPrivate, permissions: { push: true } })
+  if (method === 'GET') {
+    if (!fakeRepo) return json(404, { message: 'Not Found' })
+    return json(200, { content: Buffer.from(fakeRepo.text, 'utf-8').toString('base64'), sha: fakeRepo.sha, encoding: 'base64' })
+  }
+  const body = JSON.parse(req.postData())
+  putCount++
+  fakeRepo = { text: Buffer.from(body.content, 'base64').toString('utf-8'), sha: 'sha' + putCount }
+  return json(200, { content: { sha: fakeRepo.sha } })
+})
+
+await page.click('[data-testid=tab-settings]')
+await page.waitForSelector('[data-testid=sync-card]')
+check('P7 sync starts off', (await text('[data-testid=sync-status]')) === 'desligada')
+await page.click('[data-testid=sync-toggle-config]')
+await page.fill('[data-testid=sync-repo]', 'https://github.com/felipe/gastos-dados.git')
+await page.fill('[data-testid=sync-token]', 'github_pat_fake')
+await page.click('[data-testid=sync-auto]')           // keep the run deterministic
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-auto]')?.checked === false)
+await page.click('[data-testid=sync-save]')
+await page.waitForSelector('[data-testid=sync-msg]')
+check('P7 repo URL normalised on save', (await page.inputValue('[data-testid=sync-repo]')) === 'felipe/gastos-dados')
+
+await page.click('[data-testid=sync-test]')
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-msg]')?.textContent?.includes('Conexão certa'))
+check('P7 connection test passes', true)
+
+repoPrivate = false
+await page.click('[data-testid=sync-test]')
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-msg]')?.textContent?.includes('PÚBLICO'))
+check('P7 refuses a public repo', true)
+repoPrivate = true
+
+const localCount = await countTx()
+await page.click('[data-testid=tab-settings]')
+await page.click('[data-testid=sync-push]')
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-msg]')?.textContent?.includes('Enviado'))
+check('P7 push wrote the snapshot', fakeRepo !== null && JSON.parse(fakeRepo.text).transactions.length === localCount, `${localCount} rows`)
+check('P7 snapshot carries the new tables', (() => {
+  const b = JSON.parse(fakeRepo.text)
+  return Array.isArray(b.untrackedPeriods) && Array.isArray(b.balanceChecks) && b.version === 2
+})())
+
+// A device holding less than the repo must not be able to clobber it silently.
+const good = fakeRepo.text
+const inflated = JSON.parse(good)
+inflated.transactions = inflated.transactions.concat(inflated.transactions.slice(0, 50).map((t, i) => ({ ...t, id: 900000 + i })))
+fakeRepo = { text: JSON.stringify(inflated), sha: 'inflated' }
+const putsBefore = putCount
+await page.click('[data-testid=sync-push]')
+await page.waitForSelector('[data-testid=push-blocked]')
+check('P7 guard blocks overwriting a bigger snapshot', putCount === putsBefore && fakeRepo.sha === 'inflated')
+await page.click('[data-testid=push-force]')
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-msg]')?.textContent?.includes('Enviado'))
+check('P7 force overrides the guard', JSON.parse(fakeRepo.text).transactions.length === localCount)
+
+// Pull replaces local data with the snapshot.
+await page.click('[data-testid=tab-entry]')
+await page.waitForSelector('[data-testid=keypad]')
+for (const k of ['9']) await page.click(`[data-key="${k}"]`)
+await (await page.waitForSelector('[data-testid=chips] [data-testid=chip]:has-text("Café")')).click()
+await page.waitForSelector('[data-testid=toast]')
+check('P7 local edit before pull', (await countTx()) === localCount + 1)
+await page.click('[data-testid=tab-settings]')
+await page.click('[data-testid=sync-pull]')
+await page.waitForSelector('[data-testid=pull-confirm]')
+check('P7 pull asks before replacing', true)
+await page.click('[data-testid=pull-confirm-yes]')
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-msg]')?.textContent?.includes('Recebido'))
+await page.waitForFunction((n) => document.querySelector('[data-testid=tx-count]')?.textContent === String(n), localCount)
+check('P7 pull replaced local data with the snapshot', (await countTx()) === localCount)
+
+fakeRepo = null
+await page.click('[data-testid=tab-settings]')          // countTx() leaves us on the entry tab
+await page.waitForSelector('[data-testid=sync-pull]')
+await page.click('[data-testid=sync-pull]')
+await page.click('[data-testid=pull-confirm-yes]')
+await page.waitForFunction(() => document.querySelector('[data-testid=sync-msg]')?.textContent?.includes('Ainda não há snapshot'))
+check('P7 empty repo does not wipe the device', (await countTx()) === localCount)
+await shot('p7-sync')
 
 // ---------- wrap ----------
 check('no console/page errors', errors.length === 0, errors.join('\n'))

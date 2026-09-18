@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { importWallet, type ImportReport } from '../import/importer'
+import { flush, withSyncSuspended } from '../sync/autopush'
 import type { Group } from '../db/types'
 import { formatMinor } from '../lib/money'
 import { ensureTaxonomy } from '../db/taxonomy'
@@ -41,26 +43,23 @@ async function loadSummary(): Promise<Summary> {
 }
 
 export function ImportScreen() {
-  const [summary, setSummary] = useState<Summary | null>(null)
+  // Live, so the figures stay true after an import, a restore or a sync pull — anything that
+  // rewrites the database from outside this screen.
+  const summary = useLiveQuery(loadSummary, [])
   const [report, setReport] = useState<ImportReport | null>(null)
   const [pendingCsv, setPendingCsv] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const refresh = () => loadSummary().then(setSummary)
-  useEffect(() => {
-    void refresh()
-  }, [])
 
   async function onFile(file: File) {
     setBusy(true)
     setError(null)
     try {
       const text = await file.text()
-      const r = await importWallet(db, text)
+      const r = await withSyncSuspended(() => importWallet(db, text))
       setReport(r)
       setPendingCsv(r.collisions.length ? text : null)
-      await refresh()
+      void flush(db, { force: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -72,10 +71,10 @@ export function ImportScreen() {
     if (!pendingCsv) return
     setBusy(true)
     try {
-      const r = await importWallet(db, pendingCsv, { acceptCollisions: true })
+      const r = await withSyncSuspended(() => importWallet(db, pendingCsv, { acceptCollisions: true }))
       setReport(r)
       setPendingCsv(null)
-      await refresh()
+      void flush(db, { force: true })
     } finally {
       setBusy(false)
     }
@@ -90,7 +89,6 @@ export function ImportScreen() {
       await ensureTaxonomy(db)
       setReport(null)
       setPendingCsv(null)
-      await refresh()
     } finally {
       setBusy(false)
     }

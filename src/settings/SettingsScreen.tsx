@@ -4,6 +4,7 @@ import { useSetting } from '../db/hooks'
 import { DEFAULT_REF_CURRENCY } from '../db/types'
 import { applyUpdate, isIos, promptInstall, pwaState, subscribe } from '../pwa'
 import { ImportScreen } from '../ui/ImportScreen'
+import { SyncCard } from './SyncCard'
 import { UntrackedPeriods } from './UntrackedPeriods'
 
 const CURRENCIES = ['CNY', 'BRL', 'USD', 'EUR']
@@ -42,6 +43,8 @@ export function SettingsScreen() {
           <p className="mt-2 text-[11px] text-slate-500">Totais e gráficos usam esta moeda. Lançamentos em outra moeda guardam a taxa do dia; mudar aqui não reconverte o histórico.</p>
 
         </div>
+
+        <SyncCard />
 
         <UntrackedPeriods />
 
