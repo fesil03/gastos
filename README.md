@@ -7,7 +7,7 @@ Local-first personal expense tracker. Vite + React + TypeScript, Dexie (IndexedD
 ```
 npm install
 npm run dev        # http://localhost:5173
-npm test           # vitest: 90 tests incl. acceptance against the real export
+npm test           # vitest: unit tests incl. acceptance against the real export
                    # (fixtures/*.csv is personal data and not committed — those suites skip without it)
 npm run build      # tsc -b && vite build → dist/  (root-path build)
 npm run build:pages   # same, for GitHub Pages at /gastos/
@@ -25,6 +25,16 @@ git worktree add ../gastos-pages gh-pages   # once
 rm -rf ../gastos-pages/* && cp -r dist/* ../gastos-pages/ && touch ../gastos-pages/.nojekyll
 (cd ../gastos-pages && git add -A && git commit -m "deploy" && git push)
 ```
+
+Before each deploy, tag what's live so there is a named version to go back to:
+
+```
+git tag live-$(date +%Y-%m-%d) main && git push --tags   # the source that's about to ship
+```
+
+Rollback: every deploy is a commit on `gh-pages`, so `(cd ../gastos-pages && git revert --no-edit HEAD && git push)`
+puts the previous build back. On the phone, the update banner (or a reopen) picks it up. No data is
+affected either way — it lives in IndexedDB, and budgets are an ordinary setting with no schema change.
 
 `dist/` is otherwise a plain static site (Cloudflare Pages / Vercel work too: build `npm run build`, output `dist`).
 
@@ -54,7 +64,7 @@ src/db/          types · Dexie schema (v1→v2 upgrade) · taxonomy seed (colou
 src/import/      Wallet CSV primitives (PapaParse, string-arithmetic money, naive local dates, sha256) · importer
 src/entry/       keypad · category chips (long-press) · picker · "mais" drawer · 90-day ranking · EntryScreen
 src/list/        filter/group (pure) · ListScreen · EditSheet
-src/insights/    engine (pure, tested: coverage flavours, top-up exclusions, capture rate) · charts (hand-rolled SVG) · CoveragePanel · BalancePanel · InsightsScreen
+src/insights/    engine (pure, tested: coverage flavours, top-up exclusions, capture rate) · projection + budget (pure, tested) · MonthPanel · charts (hand-rolled SVG) · CoveragePanel · BalancePanel · InsightsScreen
 src/export/      bundle (Markdown/CSV) · backup (JSON, restore merge/replace) · deliver (share/download/copy) · ExportScreen
 src/settings/    SettingsScreen (ref currency, sync, untracked periods, PWA status, import)
 src/sync/        github (Contents API client) · snapshot (push/pull + the shrink guard) · autopush (debounced writer)
@@ -107,6 +117,30 @@ device is lost. The snapshot itself is not encrypted; it relies on the repo bein
 - Otherwise a month is `incomplete` when its expense count is below 40% of the median of the trailing six baseline months; a partially untracked month is judged against a threshold scaled by its tracked-day share and stays out of the baseline.
 - Top-up categories (`isTopUp`) stay in every spend total and every breakdown, and are removed only from the heatmap, small-ticket leakage and median/mean ticket.
 
+## Projeção do mês e orçamento
+
+Insights opens with **Este mês**: spent so far, where the month is heading, and — once a monthly
+budget is set — what that means per day. The entry screen shows one line of it under today's
+entries. Logic lives in `src/insights/projection.ts` (pure, tested in `projection.test.ts`).
+
+- **Two projections.** *Pace* is this month alone: spent so far plus the everyday daily rate carried
+  over the days left. *Trend* (the headline when there's history) blends that rate with the last
+  three fully tracked months' — weighted `elapsed / (elapsed + 7)` toward this month — and adds the
+  large spends a typical (median) month still has ahead, so one exceptional purchase in the history
+  doesn't leak into every month after it.
+- **One-offs aren't multiplied out.** Top-ups and any ticket at or above the 95th percentile of the
+  last six months' tickets (floor 200) count once. Rent on the 1st doesn't become 30× rent.
+- **The band is earned.** The trend projection is re-run on each of the last six tracked months as
+  of the same day of the month and compared with how they really ended; the median miss is the ±.
+  Fewer than three such months → no band.
+- **Coverage rules carry over.** Declared untracked days leave both the elapsed and remaining day
+  counts; incomplete or partly untracked months never serve as history.
+- **Budget.** One amount per month in the reference currency (setting `monthlyBudget`, stored with
+  its currency so a currency switch can't silently re-denominate it). Guidance: status against the
+  projection, and a daily allowance for everyday spending = (budget − spent before today − large
+  spends still expected) ÷ days left including today. Suggested starting value: the median of the
+  last six tracked months. The setting travels with the sync snapshot.
+
 ## Not in v1 (spec §7, phase 7)
 
-Budgets, recurring engine, receipt photos, bank sync, multi-user, cloud accounts, payment method. Tag/category management UI beyond inline create (rename / archive / regroup / toggle top-up) and structured-note editing are the natural phase-7 items.
+Per-category budgets, recurring engine, receipt photos, bank sync, multi-user, cloud accounts, payment method. Tag/category management UI beyond inline create (rename / archive / regroup / toggle top-up) and structured-note editing are the natural phase-7 items.
