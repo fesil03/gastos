@@ -5,6 +5,8 @@ import { formatMinor } from '../lib/money'
 import { BalancePanel } from './BalancePanel'
 import { Donut, Heatmap, MonthlyColumns, RankedBars, StatTile, compact } from './charts'
 import { CoveragePanel } from './CoveragePanel'
+import { MonthPanel } from './MonthPanel'
+import { useMonthOutlook } from './useMonthOutlook'
 import {
   categoryBreakdown,
   categoryDrift,
@@ -27,6 +29,7 @@ export function InsightsScreen() {
   const currency = useRefCurrency()
   const untracked = useUntrackedPeriods() ?? []
   const checks = useBalanceChecks() ?? []
+  const outlook = useMonthOutlook()
   const topUpIds = taxonomy.topUpIds
   const [period, setPeriod] = useState<Period>('12m')
   const [heatMode, setHeatMode] = useState<'count' | 'total'>('count')
@@ -90,6 +93,8 @@ export function InsightsScreen() {
 
   return (
     <div className="space-y-5 px-4 pb-8 pt-4" data-testid="insights-screen">
+      {outlook && <MonthPanel outlook={outlook} />}
+
       <div className="flex items-center gap-1.5 overflow-x-auto text-xs [scrollbar-width:none]">
         {(
           [

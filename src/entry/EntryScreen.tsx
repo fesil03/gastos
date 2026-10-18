@@ -4,6 +4,8 @@ import { addTransaction, deleteTransaction, restoreTransaction } from '../db/mut
 import type { Transaction } from '../db/types'
 import { dayKey, formatTime, nowIso, toLocalIso } from '../lib/dates'
 import { formatKeypad, formatMinor, keypadToMinor } from '../lib/money'
+import { compact } from '../insights/charts'
+import { useMonthOutlook } from '../insights/useMonthOutlook'
 import { Toast, type ToastState } from '../ui/Toast'
 import { CategoryChip } from './CategoryChip'
 import { CategoryPicker } from './CategoryPicker'
@@ -167,6 +169,7 @@ export function EntryScreen() {
         )}
 
         {!more && txs && <TodaySoFar txs={txs} refCurrency={refCurrency} taxonomy={taxonomy} />}
+        {!more && <BudgetHint />}
       </div>
 
       {/* Chips + keypad, pinned to the bottom for one-handed reach */}
@@ -241,5 +244,29 @@ function TodaySoFar({ txs, refCurrency, taxonomy }: { txs: Transaction[]; refCur
         ))}
       </ul>
     </div>
+  )
+}
+
+/** One line of budget guidance under today's entries — only when a budget is set. */
+function BudgetHint() {
+  const outlook = useMonthOutlook()
+  const g = outlook?.guidance
+  if (!outlook || !g) return null
+  const money = (m: number) => formatMinor(m, outlook.currency, { sign: false })
+  if (g.status === 'over') {
+    return (
+      <p className="mt-3 text-xs text-rose-300" data-testid="budget-hint">
+        Orçamento do mês estourado em {money(-g.remainingMinor)}.
+      </p>
+    )
+  }
+  if (g.dailyAllowanceMinor == null) return null
+  const todayOver = g.spentTodayMinor > g.dailyAllowanceMinor
+  const heading = g.status === 'over-projected' ? 'text-rose-300' : g.status === 'tight' ? 'text-amber-300' : 'text-slate-300'
+  return (
+    <p className="mt-3 text-xs text-slate-500" data-testid="budget-hint">
+      Orçamento: <span className={`tabular-nums ${todayOver ? 'text-amber-300' : 'text-slate-300'}`}>{money(g.spentTodayMinor)}</span> de {money(g.dailyAllowanceMinor)} hoje · fim do mês{' '}
+      <span className={`tabular-nums ${heading}`}>{compact(g.projectedMinor, outlook.currency)}</span> / {compact(g.budgetMinor, outlook.currency)}
+    </p>
   )
 }
