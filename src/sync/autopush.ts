@@ -55,6 +55,15 @@ function markDirty(db: GastosDB) {
   timer = setTimeout(() => void flush(db), DEBOUNCE_MS)
 }
 
+/**
+ * Schedules a push for a change the table hooks don't see. The settings table is not watched
+ * (the sync bookkeeping lives there and would retrigger itself), so a user-facing setting that
+ * should travel with the snapshot — the monthly budget — calls this after saving.
+ */
+export function requestPush(db: GastosDB): void {
+  markDirty(db)
+}
+
 /** Pushes now if there is anything to push. Safe to call at any time. */
 export async function flush(db: GastosDB, opts: { force?: boolean } = {}): Promise<void> {
   if (timer) {
