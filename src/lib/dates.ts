@@ -92,3 +92,9 @@ export function formatTime(iso: string): string {
 }
 
 export { WEEKDAYS_PT, MONTHS_PT }
+
+/** Milliseconds from `now` to just after the next local midnight (a second past, to be safely on the new day). */
+export function msUntilNextDay(now = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1)
+  return next.getTime() - now.getTime()
+}

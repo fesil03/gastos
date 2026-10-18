@@ -59,3 +59,16 @@ export function convertMinor(amountMinor: number, fxRate: number): number {
   const v = amountMinor * fxRate
   return v < 0 ? -Math.round(-v) : Math.round(v)
 }
+
+/**
+ * A positive amount typed into a free text field → minor units, or null. Accepts the shapes people
+ * actually type: "5000", "5000.5", "5.000" and "5.000,50" (pt-BR), "5,000.50" (en), "¥5 000".
+ */
+export function parseTypedAmount(raw: string): number | null {
+  let s = raw.replace(/[\s¥$€R]/g, '')
+  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(s)) s = s.replace(/,/g, '') // 5,000.50
+  else if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.') // 5.000,50
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '') // 5.000
+  const m = keypadToMinor(s)
+  return m != null && m > 0 ? m : null
+}
