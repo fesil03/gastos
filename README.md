@@ -17,7 +17,13 @@ npm run smoke:pages   # headless-Chromium end-to-end run of the /gastos/ build, 
 
 ## Deploy — GitHub Pages
 
-The live app is the `gh-pages` branch, served at `https://<user>.github.io/gastos/`. To ship a new build:
+The live app is the `gh-pages` branch, served at `https://<user>.github.io/gastos/`.
+
+**Automatic:** `.github/workflows/ci.yml` runs `npm ci`, `npm test` and `npm run build:pages` on every push.
+A push to `main` that passes all of them commits the new build to `gh-pages` (one commit per deploy).
+Nothing deploys if anything fails. Work happens on a branch; merging to `main` is the release.
+
+**Manual** (same result, e.g. from the laptop):
 
 ```
 npm run build:pages
@@ -26,15 +32,10 @@ rm -rf ../gastos-pages/* && cp -r dist/* ../gastos-pages/ && touch ../gastos-pag
 (cd ../gastos-pages && git add -A && git commit -m "deploy" && git push)
 ```
 
-Before each deploy, tag what's live so there is a named version to go back to:
-
-```
-git tag live-$(date +%Y-%m-%d) main && git push --tags   # the source that's about to ship
-```
-
-Rollback: every deploy is a commit on `gh-pages`, so `(cd ../gastos-pages && git revert --no-edit HEAD && git push)`
-puts the previous build back. On the phone, the update banner (or a reopen) picks it up. No data is
-affected either way — it lives in IndexedDB, and budgets are an ordinary setting with no schema change.
+**Rollback points.** Before a release, keep a ref to what's live: a tag (`git tag live-$(date +%F) gh-pages && git push --tags`)
+or a `backup/…` branch. To roll back the live site, revert the last deploy commit on `gh-pages`
+(`git revert --no-edit HEAD && git push` in a `gh-pages` checkout); the phone picks it up on the next open. No data
+is affected either way — it lives in IndexedDB on the device, never in this repo.
 
 `dist/` is otherwise a plain static site (Cloudflare Pages / Vercel work too: build `npm run build`, output `dist`).
 

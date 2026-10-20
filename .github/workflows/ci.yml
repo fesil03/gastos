@@ -1,0 +1,65 @@
+# Every push and PR: install, type-check + build (tsc -b runs inside build), run the test suite.
+# A push to main that passes also deploys the GitHub Pages build to the gh-pages branch — the same
+# thing the manual steps in the README do. Nothing deploys if any check fails.
+#
+# The real Wallet export (fixtures/*.csv) is personal data and not in the repo, so the acceptance
+# suites and the Playwright smoke test skip here; run `npm test && npm run smoke` locally for those.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:pages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: deploy-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish to gh-pages (one commit per deploy, so `git revert` rolls back)
+        run: |
+          cd pages
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r ../dist/. .
+          touch .nojekyll
+          git add -A
+          if git diff --cached --quiet; then echo "build unchanged, nothing to deploy"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "deploy: ${GITHUB_SHA::7}"
+          git push
