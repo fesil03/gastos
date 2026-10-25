@@ -15,14 +15,15 @@ export interface RankedCategory {
 
 export function rankCategories(
   txs: Iterable<Transaction>,
-  opts: { now?: Date; windowDays?: number; limit?: number } = {},
+  opts: { now?: Date; windowDays?: number; limit?: number; exclude?: Set<number> } = {},
 ): RankedCategory[] {
-  const { now = new Date(), windowDays = 90, limit = 8 } = opts
+  const { now = new Date(), windowDays = 90, limit = 8, exclude } = opts
   const cutoff = dayKey(now, -windowDays)
   const byCat = new Map<number, RankedCategory & { lastDate: string }>()
 
   for (const t of txs) {
     if (t.amountMinor >= 0) continue // income never earns a chip
+    if (exclude?.has(t.categoryId)) continue // archived categories never come back as chips
     let r = byCat.get(t.categoryId)
     if (!r) {
       r = { categoryId: t.categoryId, recentCount: 0, allTimeCount: 0, lastDate: '' }

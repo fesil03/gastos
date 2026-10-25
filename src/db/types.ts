@@ -53,6 +53,8 @@ export interface Category {
   isTopUp: 0 | 1
   walletEnvelopeId?: number // provenance only — joins are by categoryId, never by name
   walletCustom?: boolean
+  /** Former names (kept by renames) so a Wallet CSV carrying an old name maps here instead of recreating it. */
+  aliases?: string[]
 }
 
 export interface Tag {

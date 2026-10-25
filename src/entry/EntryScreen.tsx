@@ -38,7 +38,8 @@ export function EntryScreen() {
     setExtras((x) => (x.note || x.tags.length || x.customDate ? x : EMPTY_EXTRAS(refCurrency)))
   }, [refCurrency])
 
-  const ranked = useMemo(() => (txs ? rankCategories(txs, { limit: 8 }) : []), [txs])
+  const archivedIds = useMemo(() => new Set(taxonomy.categories.filter((c) => c.archived === 1).map((c) => c.id!)), [taxonomy.categories])
+  const ranked = useMemo(() => (txs ? rankCategories(txs, { limit: 8, exclude: archivedIds }) : []), [txs, archivedIds])
   const amountMinor = keypadToMinor(amount)
   const dismissToast = useCallback((id: number) => setToast((t) => (t?.id === id ? null : t)), [])
 

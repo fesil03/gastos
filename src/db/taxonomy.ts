@@ -107,6 +107,9 @@ export async function ensureCategory(
 ): Promise<number> {
   const existing = await d.categories.where('name').equals(name).first()
   if (existing) return existing.id!
+  // A category renamed by a taxonomy migration answers to its old names too.
+  const renamed = await d.categories.filter((c) => !!c.aliases?.includes(name)).first()
+  if (renamed) return renamed.id!
   const cat: Category = { name, groupId, archived: 0, isTopUp: TOP_UP_CATEGORY_NAMES.includes(name) ? 1 : 0, ...provenance }
   return (await d.categories.add(cat)) as number
 }

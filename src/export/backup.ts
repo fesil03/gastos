@@ -99,11 +99,12 @@ export async function restoreBackup(db: GastosDB, b: Backup, mode: 'replace' | '
   const backupGroupName = new Map(b.groups.map((g) => [g.id!, g.name]))
   const outrosId = groupIdByName.get('Outros')!
 
-  // categories by name
+  // categories by name — or by a former name, so a backup taken before a rename lands on the
+  // renamed category instead of recreating the old one
   const catIdMap = new Map<number, number>()
   let categoriesAdded = 0
   for (const c of b.categories) {
-    const existing = await db.categories.where('name').equals(c.name).first()
+    const existing = (await db.categories.where('name').equals(c.name).first()) ?? (await db.categories.filter((x) => !!x.aliases?.includes(c.name)).first())
     if (existing) catIdMap.set(c.id!, existing.id!)
     else {
       const groupId = groupIdByName.get(backupGroupName.get(c.groupId) ?? '') ?? outrosId
@@ -120,15 +121,15 @@ export async function restoreBackup(db: GastosDB, b: Backup, mode: 'replace' | '
   }
   // transactions
   const existingHashes = new Set((await db.transactions.orderBy('externalHash').uniqueKeys()) as string[])
+  // Rows without a hash are matched on date+amount+currency+category, comparing categories by
+  // their id in THIS database (after the mapping above) — so a renamed category still matches.
   const existingKeys = new Set<string>()
-  const catNameOf = new Map((await db.categories.toArray()).map((c) => [c.id!, c.name]))
-  await db.transactions.each((t) => existingKeys.add(`${t.date}|${t.amountMinor}|${t.currency}|${catNameOf.get(t.categoryId)}`))
+  await db.transactions.each((t) => existingKeys.add(`${t.date}|${t.amountMinor}|${t.currency}|${t.categoryId}`))
 
   const toAdd: Transaction[] = []
   let skipped = 0
-  const backupCatName = new Map(b.categories.map((c) => [c.id!, c.name]))
   for (const t of b.transactions) {
-    const dup = t.externalHash ? existingHashes.has(t.externalHash) : existingKeys.has(`${t.date}|${t.amountMinor}|${t.currency}|${backupCatName.get(t.categoryId)}`)
+    const dup = t.externalHash ? existingHashes.has(t.externalHash) : existingKeys.has(`${t.date}|${t.amountMinor}|${t.currency}|${catIdMap.get(t.categoryId) ?? t.categoryId}`)
     if (dup) {
       skipped++
       continue

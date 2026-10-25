@@ -142,6 +142,23 @@ entries. Logic lives in `src/insights/projection.ts` (pure, tested in `projectio
   spends still expected) ÷ days left including today. Suggested starting value: the median of the
   last six tracked months. The setting travels with the sync snapshot.
 
+## Category migrations
+
+Categories live in the phone's IndexedDB, so changing them for an existing install takes a migration:
+`src/db/migrations.ts` → `TAXONOMY_MIGRATIONS`, run once per database on app open (settings `taxonomyVersion`),
+with sync change-tracking off so the push on open carries the result.
+
+- **Rename**: changes the name only; transactions join by `categoryId`, so no row is touched. The old name goes
+  into `aliases`, which the Wallet importer and the backup *merge* restore both honour — an old name never comes back.
+- **Merge**: only when explicitly chosen. Moves the rows, logs their ids under settings `taxonomyLog` (reversible),
+  deletes the emptied category, adds its names to the survivor's aliases.
+- **Archive**: hidden from the entry picker and chips; history and Insights unchanged; still selectable in the List filter.
+- **Add**: skipped if a category with an equivalent name already exists.
+
+v1 (Oct 2026): Saúde renamed by *what* was bought — Higiene & skincare (creme, sabonete, desodorante, retinol),
+Massagem & salão (massagem, cabelo, spa), Médico & exames, Farmácia; the two gift categories merged into
+Presentes & doações (Vida & Lazer); Fora de Casa and Lojinhas archived (replaced in Jul 2025); Bike added to Transporte.
+
 ## Not in v1 (spec §7, phase 7)
 
 Per-category budgets, recurring engine, receipt photos, bank sync, multi-user, cloud accounts, payment method. Tag/category management UI beyond inline create (rename / archive / regroup / toggle top-up) and structured-note editing are the natural phase-7 items.
