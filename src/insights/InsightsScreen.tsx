@@ -62,8 +62,9 @@ export function InsightsScreen() {
   }
 
   // Drift compares the latest month that has data against its trailing complete months.
+  // Entries logged ahead (a ticket dated next week) must not drag it into a month that hasn't started.
   const driftMonth = useMemo(() => {
-    const withData = stats.filter((m) => m.count > 0)
+    const withData = stats.filter((m) => m.count > 0 && m.month <= thisMonth)
     return withData.length ? withData[withData.length - 1].month : thisMonth
   }, [stats, thisMonth])
   const drift = useMemo(() => categoryDrift(all, driftMonth, stats).slice(0, 6), [all, driftMonth, stats])
