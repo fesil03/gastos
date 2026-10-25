@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Taxonomy } from '../db/hooks'
 import { addCategory } from '../db/mutations'
+import { normalize } from '../list/filter'
 import { Sheet } from '../ui/Sheet'
 
 interface Props {
@@ -8,13 +9,15 @@ interface Props {
   onPick: (categoryId: number) => void
   onClose: () => void
   title?: string
+  /** Also list archived categories, marked — for filtering history. Off when logging. */
+  showArchived?: boolean
 }
 
 /** Full category list grouped by group, with search and inline "new category". */
-export function CategoryPicker({ taxonomy, onPick, onClose, title = 'Categoria' }: Props) {
+export function CategoryPicker({ taxonomy, onPick, onClose, title = 'Categoria', showArchived = false }: Props) {
   const [q, setQ] = useState('')
   const [newGroupId, setNewGroupId] = useState<number | null>(null)
-  const needle = q.trim().toLowerCase()
+  const needle = normalize(q.trim())
 
   const groups = taxonomy.groups
     .slice()
@@ -22,17 +25,17 @@ export function CategoryPicker({ taxonomy, onPick, onClose, title = 'Categoria' 
     .map((g) => ({
       group: g,
       cats: taxonomy.categories
-        .filter((c) => c.groupId === g.id && !c.archived && (!needle || c.name.toLowerCase().includes(needle)))
+        .filter((c) => c.groupId === g.id && (showArchived || !c.archived) && (!needle || normalize(c.name).includes(needle)))
         .sort((a, b) => a.name.localeCompare(b.name, 'pt')),
     }))
     .filter((g) => g.cats.length || (needle && newGroupId === g.group.id))
 
-  const exact = taxonomy.categories.some((c) => c.name.toLowerCase() === needle)
+  const exact = taxonomy.categories.some((c) => normalize(c.name) === needle)
 
   return (
     <Sheet title={title} onClose={onClose}>
+      {/* No autoFocus: on the phone it pops the keyboard over the list, and picking is done by tapping. */}
       <input
-        autoFocus
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Buscar ou criar…"
@@ -76,10 +79,11 @@ export function CategoryPicker({ taxonomy, onPick, onClose, title = 'Categoria' 
                 <button
                   key={c.id}
                   data-testid="picker-category"
-                  className="rounded-full bg-slate-800 px-3 py-1.5 text-sm active:scale-95"
+                  className={`rounded-full px-3 py-1.5 text-sm active:scale-95 ${c.archived ? 'bg-slate-900 text-slate-500' : 'bg-slate-800'}`}
                   onClick={() => onPick(c.id!)}
                 >
                   {c.name}
+                  {c.archived === 1 && <span className="ml-1 text-[9px] uppercase tracking-wide text-slate-600">arquivada</span>}
                   {c.isTopUp === 1 && <span className="ml-1 text-[9px] uppercase tracking-wide text-slate-500">top-up</span>}
                 </button>
               ))}

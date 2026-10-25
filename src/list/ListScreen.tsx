@@ -214,6 +214,7 @@ export function ListScreen() {
         <CategoryPicker
           taxonomy={taxonomy}
           title="Filtrar por categoria"
+          showArchived
           onClose={() => setPicker(false)}
           onPick={(id) => {
             setCategoryIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
