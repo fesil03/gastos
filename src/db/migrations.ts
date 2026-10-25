@@ -44,15 +44,17 @@ export interface CategoryMerge {
 }
 
 /**
- * Re-categorize one specific entry, picked by its exact timestamp (to the second), amount and
- * current category. Never matches more than one row: a pick that is ambiguous, already moved, or
- * gone is skipped, so later entries in the same category can never be swept along.
+ * Re-categorize the entries of one category inside a date window, limited to rows created before
+ * a cut-off — i.e. the entries that existed when the decision was made. Rows logged afterwards,
+ * even with a date inside the window, are never swept along. Expressed as a rule rather than a
+ * list of entries so no personal data has to live in this (public) repository.
  */
-export interface TransactionMove {
-  date: string // local naive ISO, exact
-  amountMinor: number // signed, in the entry's own currency
+export interface CategoryMoveRule {
   from: string // current category name
   to: string // target category name (after this version's renames)
+  dateFrom: string // 'YYYY-MM-DD', inclusive
+  dateTo: string // local naive ISO, inclusive
+  createdBefore: string // local naive ISO, exclusive
 }
 
 export interface TaxonomyMigration {
@@ -60,7 +62,7 @@ export interface TaxonomyMigration {
   /** Applied in this order: renames, merges, moves, archive, additions. */
   renames?: CategoryRename[]
   merges?: CategoryMerge[]
-  moves?: TransactionMove[]
+  moves?: CategoryMoveRule[]
   /** Hide from pickers and chips. History is untouched. */
   archive?: string[]
   additions?: CategoryAddition[]
@@ -96,27 +98,10 @@ export const TAXONOMY_MIGRATIONS: TaxonomyMigration[] = [
     additions: [{ name: 'Bike', group: 'Transporte', alsoMatches: ['Bicicleta', 'Shared bike', 'Bike compartilhada', 'Hellobike', 'Meituan bike'] }],
   },
   {
-    // Felipe: every 2026 Farmácia entry so far was skincare, no medicine. These exact 14 move;
-    // anything else in Farmácia, including entries made after this, stays.
+    // Felipe (25 Oct 2026, 21:39): every 2026 Farmácia entry up to then was skincare, no medicine.
+    // Those move; anything logged after that moment stays in Farmácia, whatever its date.
     version: 2,
-    moves: (
-      [
-        ['2026-01-19T18:11:44', -7900],
-        ['2026-01-21T14:10:03', -19400],
-        ['2026-02-05T12:22:23', -7180],
-        ['2026-02-09T13:23:25', -7000],
-        ['2026-02-25T12:27:39', -2500],
-        ['2026-02-26T16:47:21', -1600],
-        ['2026-03-08T20:20:11', -2500],
-        ['2026-03-10T16:00:39', -2000],
-        ['2026-03-18T12:33:27', -8990],
-        ['2026-04-04T18:19:40', -5700],
-        ['2026-04-05T18:35:31', -6200],
-        ['2026-10-13T23:10:00', -4390],
-        ['2026-10-14T00:40:33', -5700],
-        ['2026-10-14T16:04:24', -7090],
-      ] as const
-    ).map(([date, amountMinor]) => ({ date, amountMinor, from: 'Farmácia', to: 'Higiene & skincare' })),
+    moves: [{ from: 'Farmácia', to: 'Higiene & skincare', dateFrom: '2026-01-01', dateTo: '2026-10-25T23:59:59', createdBefore: '2026-10-25T21:39:00' }],
   },
 ]
 
@@ -209,25 +194,21 @@ export async function migrateTaxonomy(d: GastosDB, migrations: TaxonomyMigration
         await d.categories.delete(source.id!)
         report.merged.push({ from: source.name, into: target.name, moved: moved.length })
       }
-      // Moves, grouped by from→to so each pair gets one log entry.
-      const pairs = new Map<string, TransactionMove[]>()
-      for (const mv of m.moves ?? []) pairs.set(`${mv.from}\u0000${mv.to}`, [...(pairs.get(`${mv.from}\u0000${mv.to}`) ?? []), mv])
-      for (const list of pairs.values()) {
+      for (const mv of m.moves ?? []) {
         const cats = await d.categories.toArray()
-        const source = findByNames(cats, [list[0].from])
-        const target = findByNames(cats, [list[0].to])
+        const source = findByNames(cats, [mv.from])
+        const target = findByNames(cats, [mv.to])
         if (!source || !target || source.id === target.id) {
-          report.skipped.push({ step: `${list[0].from} → ${list[0].to}`, reason: 'categoria de origem ou destino não existe' })
-          continue
+          if (!target) report.skipped.push({ step: `${mv.from} → ${mv.to}`, reason: `"${mv.to}" não existe` })
+          continue // no source: nothing left to move
         }
-        const ids: number[] = []
-        for (const mv of list) {
-          const hits = await d.transactions.where('date').equals(mv.date).filter((t) => t.amountMinor === mv.amountMinor && t.categoryId === source.id).toArray()
-          if (hits.length === 1) ids.push(hits[0].id!)
-          else if (hits.length > 1) report.skipped.push({ step: `${mv.date} ${mv.amountMinor}`, reason: 'mais de um lançamento igual; não movo' })
-          // 0 hits: already moved, edited or deleted — leave it alone
-        }
-        if (!ids.length) continue
+        const lo = `${mv.dateFrom}T00:00:00`
+        const ids = (await d.transactions
+          .where('categoryId')
+          .equals(source.id!)
+          .filter((t) => t.date >= lo && t.date <= mv.dateTo && t.createdAt < mv.createdBefore)
+          .primaryKeys()) as number[]
+        if (!ids.length) continue // already moved, or nothing matched
         await d.transactions.where(':id').anyOf(ids).modify({ categoryId: target.id! })
         const log = await getSetting<MergeLogEntry[]>(d, TAXONOMY_LOG_KEY, [])
         log.push({

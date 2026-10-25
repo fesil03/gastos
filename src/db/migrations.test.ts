@@ -251,62 +251,59 @@ describe('the shipped migration (v1)', () => {
   })
 })
 
-describe('migrateTaxonomy — moves of exact entries', () => {
-  const MOVES: TaxonomyMigration[] = [
-    {
-      version: 1,
-      moves: [
-        { date: '2026-01-19T18:11:44', amountMinor: -7900, from: 'Farmácia', to: 'Higiene & skincare' },
-        { date: '2026-10-14T16:04:24', amountMinor: -7090, from: 'Farmácia', to: 'Higiene & skincare' },
-      ],
-    },
+describe('migrateTaxonomy — move rule', () => {
+  const RULE: TaxonomyMigration[] = [
+    { version: 1, moves: [{ from: 'Farmácia', to: 'Higiene & skincare', dateFrom: '2026-01-01', dateTo: '2026-06-30T23:59:59', createdBefore: '2026-07-01T00:00:00' }] },
   ]
   async function seeded() {
     const db = freshDb()
     const g = await ensureTaxonomy(db)
     const ph = await ensureCategory(db, 'Farmácia', g.get('Saúde')!)
     const sk = await ensureCategory(db, 'Higiene & skincare', g.get('Saúde')!)
-    const [a, b, keep, later] = (await db.transactions.bulkAdd(
+    const other = await ensureCategory(db, 'Táxi', g.get('Transporte')!)
+    const [inA, inB, before, after, latecomer, notFarm] = (await db.transactions.bulkAdd(
       [
-        tx(ph, 7900, '2026-01-19T18:11:44'),
-        tx(ph, 7090, '2026-10-14T16:04:24'),
-        tx(ph, 7900, '2026-01-19T18:11:45'), // one second off: not the listed entry
-        tx(ph, 3500, '2026-11-03T10:00:00'), // a real medicine logged later
+        tx(ph, 3000, '2026-01-01T00:30:00'), // first minute of the window
+        tx(ph, 4500, '2026-06-30T23:59:59'), // last second of the window
+        tx(ph, 2000, '2025-12-31T23:59:59'), // before the window
+        tx(ph, 2500, '2026-07-01T00:00:00'), // after the window
+        tx(ph, 3500, '2026-03-15T10:00:00', { createdAt: '2026-07-02T09:00:00' }), // logged later, backdated
+        tx(other, 5000, '2026-03-15T11:00:00'),
       ],
       { allKeys: true },
     )) as number[]
-    return { db, ph, sk, a, b, keep, later }
+    return { db, ph, sk, other, inA, inB, before, after, latecomer, notFarm }
   }
 
-  it('moves exactly the listed entries and logs their ids', async () => {
-    const { db, ph, sk, a, b, keep, later } = await seeded()
-    const r = await migrateTaxonomy(db, MOVES)
+  it('moves only the window, only entries that existed at the decision, only from that category', async () => {
+    const t = await seeded()
+    const r = await migrateTaxonomy(t.db, RULE)
     expect(r.moved).toEqual([{ from: 'Farmácia', to: 'Higiene & skincare', count: 2 }])
-    expect((await db.transactions.get(a))?.categoryId).toBe(sk)
-    expect((await db.transactions.get(b))?.categoryId).toBe(sk)
-    expect((await db.transactions.get(keep))?.categoryId).toBe(ph)
-    expect((await db.transactions.get(later))?.categoryId).toBe(ph)
-    const log = await getSetting<MergeLogEntry[]>(db, TAXONOMY_LOG_KEY, [])
-    expect(log.map((e) => [e.kind, e.movedTransactionIds.sort()])).toEqual([['moves', [a, b].sort()]])
+    const cat = async (id: number) => (await t.db.transactions.get(id))?.categoryId
+    expect([await cat(t.inA), await cat(t.inB)]).toEqual([t.sk, t.sk])
+    expect([await cat(t.before), await cat(t.after), await cat(t.latecomer)]).toEqual([t.ph, t.ph, t.ph])
+    expect(await cat(t.notFarm)).toBe(t.other)
+    const log = await getSetting<MergeLogEntry[]>(t.db, TAXONOMY_LOG_KEY, [])
+    expect(log.map((e) => [e.kind, e.movedTransactionIds.sort()])).toEqual([['moves', [t.inA, t.inB].sort()]])
   })
 
   it('re-running (e.g. after an old backup reset the version) changes nothing', async () => {
     const { db } = await seeded()
-    await migrateTaxonomy(db, MOVES)
+    await migrateTaxonomy(db, RULE)
     const snapshot = JSON.stringify(await db.transactions.toArray())
     await db.settings.delete(TAXONOMY_VERSION_KEY)
-    const again = await migrateTaxonomy(db, MOVES)
+    const again = await migrateTaxonomy(db, RULE)
     expect(again.moved).toEqual([])
     expect(JSON.stringify(await db.transactions.toArray())).toBe(snapshot)
     expect(await getSetting<MergeLogEntry[]>(db, TAXONOMY_LOG_KEY, [])).toHaveLength(1)
   })
 
-  it('an ambiguous pick (two identical entries) is skipped, not guessed', async () => {
-    const { db, ph } = await seeded()
-    await db.transactions.add(tx(ph, 7900, '2026-01-19T18:11:44'))
-    const r = await migrateTaxonomy(db, MOVES)
-    expect(r.moved).toEqual([{ from: 'Farmácia', to: 'Higiene & skincare', count: 1 }])
-    expect(r.skipped.map((s) => s.reason)).toEqual(['mais de um lançamento igual; não movo'])
-    expect(await db.transactions.where('categoryId').equals(ph).count()).toBe(4)
+  it('a database already at the old v2 (entries moved one by one) is left alone', async () => {
+    const { db, sk, inA, inB } = await seeded()
+    await db.transactions.where(':id').anyOf([inA, inB]).modify({ categoryId: sk })
+    const snapshot = JSON.stringify(await db.transactions.toArray())
+    const r = await migrateTaxonomy(db, RULE)
+    expect(r.moved).toEqual([])
+    expect(JSON.stringify(await db.transactions.toArray())).toBe(snapshot)
   })
 })

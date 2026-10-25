@@ -154,12 +154,14 @@ with sync change-tracking off so the push on open carries the result.
   deletes the emptied category, adds its names to the survivor's aliases.
 - **Archive**: hidden from the entry picker and chips; history and Insights unchanged; still selectable in the List filter.
 - **Add**: skipped if a category with an equivalent name already exists.
+- **Never put entry data (dates, amounts, notes) in a migration** — the repo is public. Describe the set with a rule.
 
 v1 (Oct 2026): Saúde renamed by *what* was bought — Higiene & skincare (creme, sabonete, desodorante, retinol),
 Massagem & salão (massagem, cabelo, spa), Médico & exames, Farmácia; the two gift categories merged into
 Presentes & doações (Vida & Lazer); Fora de Casa and Lojinhas archived (replaced in Jul 2025); Bike added to Transporte.
-v2 (Oct 2026): the 14 entries of 2026 logged as Farmácia were all skincare — moved to Higiene & skincare, picked one by one
-by exact timestamp + amount (a **move** step: never sweeps other or later entries; logged like a merge).
+v2 (Oct 2026): every 2026 Farmácia entry that existed when Felipe confirmed it was skincare (25 Oct, 21:39) moves to
+Higiene & skincare — a **move rule** (category + date window + created-before cut-off), so later entries are never
+swept along and no entry data lives in this public repo. Moved ids are logged like a merge.
 
 ## Not in v1 (spec §7, phase 7)
 
