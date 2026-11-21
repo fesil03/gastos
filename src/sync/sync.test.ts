@@ -3,7 +3,8 @@ import { GastosDB, setSetting } from '../db/db'
 import { ensureCategory, ensureTaxonomy } from '../db/taxonomy'
 import { base64ToUtf8, parseRepo, utf8ToBase64, GitHubError, getFile, putFile } from './github'
 import { pullSnapshot, pushSnapshot, loadConfig, SYNC_KEYS, DEFAULT_SYNC_PATH, type SyncConfig } from './snapshot'
-import { buildBackup } from '../export/backup'
+import { buildBackup, isDeviceLocalSetting, parseBackup, restoreBackup } from '../export/backup'
+import { getSetting } from '../db/db'
 
 const CFG: SyncConfig = { owner: 'felipe', repo: 'gastos-dados', path: DEFAULT_SYNC_PATH, token: 'tok' }
 
@@ -212,5 +213,77 @@ describe('loadConfig', () => {
     expect(await loadConfig(db)).toBeNull()
     await setSetting(db, SYNC_KEYS.token, 'tok')
     expect(await loadConfig(db)).toEqual({ owner: 'felipe', repo: 'gastos-dados', path: DEFAULT_SYNC_PATH, token: 'tok' })
+  })
+})
+
+describe('sync settings stay on their own device', () => {
+  async function configured(db: GastosDB, token: string, auto: boolean) {
+    await setSetting(db, SYNC_KEYS.repo, 'felipe/gastos-dados')
+    await setSetting(db, SYNC_KEYS.token, token)
+    await setSetting(db, SYNC_KEYS.auto, auto)
+    await setSetting(db, 'refCurrency', 'CNY')
+  }
+
+  it('every sync key is device-local', () => {
+    for (const k of Object.values(SYNC_KEYS)) expect(isDeviceLocalSetting(k)).toBe(true)
+    expect(isDeviceLocalSetting('refCurrency')).toBe(false)
+    expect(isDeviceLocalSetting('monthlyBudget')).toBe(false)
+  })
+
+  it('the pushed snapshot carries no token or sync settings, but keeps shared settings', async () => {
+    installFetch()
+    const phone = await seeded(3)
+    await configured(phone, 'github_pat_PHONE_WRITE', true)
+    await pushSnapshot(phone, CFG)
+    expect(remote!.text).not.toContain('github_pat_PHONE_WRITE')
+    const keys = (JSON.parse(remote!.text) as { settings: { key: string }[] }).settings.map((s) => s.key)
+    expect(keys.some(isDeviceLocalSetting)).toBe(false)
+    expect(keys).toContain('refCurrency')
+  })
+
+  it('pulling keeps the laptop\'s own token, repo and auto-send choice', async () => {
+    installFetch()
+    const phone = await seeded(4)
+    await configured(phone, 'github_pat_PHONE_WRITE', true)
+    await pushSnapshot(phone, CFG)
+
+    const laptop = await seeded(0)
+    await configured(laptop, 'github_pat_LAPTOP_READ', false)
+    const r = await pullSnapshot(laptop, CFG)
+    expect(r.transactions).toBe(4)
+    expect(await getSetting(laptop, SYNC_KEYS.token, '')).toBe('github_pat_LAPTOP_READ')
+    expect(await getSetting(laptop, SYNC_KEYS.auto, true)).toBe(false)
+    expect(await getSetting(laptop, SYNC_KEYS.repo, '')).toBe('felipe/gastos-dados')
+    expect(await loadConfig(laptop)).not.toBeNull()
+    // and it can pull again right away — the bug was that a pull could leave it unconfigured
+    expect((await pullSnapshot(laptop, CFG)).status).toBe('pulled')
+  })
+
+  it('an OLD snapshot that still contains the phone\'s token does not overwrite the laptop\'s', async () => {
+    installFetch()
+    const phone = await seeded(2)
+    await configured(phone, 'github_pat_PHONE_WRITE', true)
+    const legacy = await buildBackup(phone, '2026-11-01T10:00:00')
+    legacy.settings.push({ key: SYNC_KEYS.token, value: 'github_pat_PHONE_WRITE' }, { key: SYNC_KEYS.auto, value: true })
+    remote = { text: JSON.stringify(legacy), sha: 'old' }
+
+    const laptop = await seeded(0)
+    await configured(laptop, 'github_pat_LAPTOP_READ', false)
+    await pullSnapshot(laptop, CFG)
+    expect(await getSetting(laptop, SYNC_KEYS.token, '')).toBe('github_pat_LAPTOP_READ')
+    expect(await getSetting(laptop, SYNC_KEYS.auto, true)).toBe(false)
+    expect(parseBackup(JSON.stringify(legacy)).settings.some((s) => isDeviceLocalSetting(s.key))).toBe(false)
+  })
+
+  it('restoring a JSON backup by hand also keeps this device\'s sync setup', async () => {
+    const other = await seeded(3)
+    await configured(other, 'github_pat_OTHER', true)
+    const file = JSON.stringify(await buildBackup(other, '2026-11-21T10:00:00'))
+    const db = await seeded(1)
+    await configured(db, 'github_pat_MINE', false)
+    await restoreBackup(db, parseBackup(file), 'replace')
+    expect(await db.transactions.count()).toBe(3)
+    expect(await getSetting(db, SYNC_KEYS.token, '')).toBe('github_pat_MINE')
+    expect(await getSetting(db, 'refCurrency', '')).toBe('CNY')
   })
 })

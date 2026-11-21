@@ -23,6 +23,15 @@ export interface Backup {
   settings: Setting[]
 }
 
+/**
+ * Settings that belong to one device — sync credentials and sync bookkeeping (keys "sync:…").
+ * They are never written into a backup or snapshot (the phone's write token must not travel
+ * inside its own data), and a restore never replaces them (a laptop that pulls keeps its own
+ * token, repository and "send automatically" choice).
+ */
+export const DEVICE_LOCAL_PREFIX = 'sync:'
+export const isDeviceLocalSetting = (key: string): boolean => key.startsWith(DEVICE_LOCAL_PREFIX)
+
 export async function buildBackup(db: GastosDB, exportedAt: string): Promise<Backup> {
   const [groups, categories, tags, transactions, untrackedPeriods, balanceChecks, settings] = await Promise.all([
     db.groups.toArray(),
@@ -33,7 +42,18 @@ export async function buildBackup(db: GastosDB, exportedAt: string): Promise<Bac
     db.balanceChecks.toArray(),
     db.settings.toArray(),
   ])
-  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt, groups, categories, tags, transactions, untrackedPeriods, balanceChecks, settings }
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt,
+    groups,
+    categories,
+    tags,
+    transactions,
+    untrackedPeriods,
+    balanceChecks,
+    settings: settings.filter((s) => !isDeviceLocalSetting(s.key)),
+  }
 }
 
 /** Parses v1 and v2 backups; v1 content is upgraded in memory to the v2 shape. */
@@ -49,7 +69,8 @@ export function parseBackup(text: string): Backup {
     const { paymentMethod: _dropped, ...rest } = t as Transaction & { paymentMethod?: unknown }
     return rest as Transaction
   })
-  const settings = (j.settings ?? []).filter((s) => s.key !== 'defaultPaymentMethod')
+  // Older snapshots carried the sending device's sync settings (token included): drop them on read.
+  const settings = (j.settings ?? []).filter((s) => s.key !== 'defaultPaymentMethod' && !isDeviceLocalSetting(s.key))
   return {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
@@ -81,6 +102,8 @@ export interface RestoreReport {
 export async function restoreBackup(db: GastosDB, b: Backup, mode: 'replace' | 'merge'): Promise<RestoreReport> {
   if (mode === 'replace') {
     await db.transaction('rw', [db.groups, db.categories, db.tags, db.transactions, db.untrackedPeriods, db.balanceChecks, db.settings], async () => {
+      // This device's own sync settings survive the wipe; everything else is replaced.
+      const keep = (await db.settings.toArray()).filter((s) => isDeviceLocalSetting(s.key))
       await Promise.all([db.groups.clear(), db.categories.clear(), db.tags.clear(), db.transactions.clear(), db.untrackedPeriods.clear(), db.balanceChecks.clear(), db.settings.clear()])
       await db.groups.bulkAdd(b.groups)
       await db.categories.bulkAdd(b.categories)
@@ -88,7 +111,9 @@ export async function restoreBackup(db: GastosDB, b: Backup, mode: 'replace' | '
       await db.transactions.bulkAdd(b.transactions)
       if (b.untrackedPeriods.length) await db.untrackedPeriods.bulkAdd(b.untrackedPeriods)
       if (b.balanceChecks.length) await db.balanceChecks.bulkAdd(b.balanceChecks)
-      if (b.settings.length) await db.settings.bulkPut(b.settings)
+      const incoming = b.settings.filter((s) => !isDeviceLocalSetting(s.key))
+      if (incoming.length) await db.settings.bulkPut(incoming)
+      if (keep.length) await db.settings.bulkPut(keep)
     })
     await ensureTaxonomy(db)
     return { mode, transactions: b.transactions.length, categories: b.categories.length, skipped: 0, untrackedPeriods: b.untrackedPeriods.length, balanceChecks: b.balanceChecks.length }
