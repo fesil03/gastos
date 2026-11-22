@@ -14,8 +14,11 @@ import { expenses, monthlyStats, untrackedDaysIn, type MonthStat } from './engin
 //             to come are added — "typical" being the median month, so one exceptional purchase
 //             in the history doesn't leak into every month after it. This is the headline whenever there is history to lean on.
 //
-// "Lumpy" rows are top-ups (spec §3: a card load is not a daily habit) and any ticket at or above
-// the 95th percentile of recent tickets. Everything else is "everyday" and drives the rate.
+// "Lumpy" rows are tickets at or above the 95th percentile of recent tickets (never under
+// LARGE_FLOOR_MINOR). Everything else is "everyday" and drives the rate — top-ups included: one
+// card load is a lump on its day, but loads come back every few days, so over a month they behave
+// like the meals they pay for, and the rate carries them. Long runs of empty days read as time
+// away (AWAY_MIN_DAYS) and leave the day counts, so a trip doesn't dilute the rate.
 //
 // The trend projection is backtested against the user's own past months — run as of the same
 // day of the month, compared with how each month really ended — and the typical miss becomes the
@@ -30,9 +33,16 @@ export const THRESHOLD_MONTHS = 6 // months whose tickets set the "large" thresh
 export const BACKTEST_MONTHS = 6
 export const MIN_BACKTEST_SAMPLES = 3
 export const LARGE_PERCENTILE = 0.95
-export const LARGE_FLOOR_MINOR = 20_000 // never call anything under 200 (ref currency) a one-off
+export const LARGE_FLOOR_MINOR = 40_000 // never call anything under 400 (ref currency) a one-off
 /** Days of this month's data that count as much as the history: w = elapsed / (elapsed + 7). */
 export const SHRINK_DAYS = 7
+/**
+ * A run of at least this many consecutive days with no entry at all, bounded by entries on both
+ * sides, is read as time away (a trip, a break) rather than as days of zero spending. Such days
+ * leave the day counts the same way declared untracked days do, so a trip doesn't drag the daily
+ * rate down. Only runs already closed by a later entry on or before asOf count — no lookahead.
+ */
+export const AWAY_MIN_DAYS = 4
 
 export type ProjectionMethod = 'trend' | 'pace' | 'none'
 
@@ -95,6 +105,8 @@ export interface ProjectionOptions {
   /** Count rows dated after asOf as already-known spend (live use). Off for backtests. */
   includeScheduled?: boolean
   backtest?: boolean
+  /** Read long runs of empty days as time away (see AWAY_MIN_DAYS). Default on. */
+  inferAway?: boolean
 }
 
 const day = (t: Transaction) => t.date.slice(0, 10)
@@ -133,12 +145,25 @@ function nextDay(d: string): string {
   return dayKey(fromLocalIso(d), 1)
 }
 
+/** Closed runs of AWAY_MIN_DAYS+ empty days up to asOf, as inclusive periods. */
+export function inferAwayPeriods(txs: Transaction[], asOf: string): UntrackedPeriod[] {
+  const days = [...new Set(expenses(txs).map(day))].filter((d) => d <= asOf).sort()
+  const out: UntrackedPeriod[] = []
+  for (let i = 0; i + 1 < days.length; i++) {
+    if (daysBetween(days[i], days[i + 1]) - 1 >= AWAY_MIN_DAYS) out.push({ start: nextDay(days[i]), end: dayKey(fromLocalIso(days[i + 1]), -1) })
+  }
+  return out
+}
+
 export function projectMonth(txs: Transaction[], opts: ProjectionOptions): Projection {
-  const { month, untracked, topUpIds, includeScheduled = true, backtest = true } = opts
-  const stats = opts.stats ?? monthlyStats(txs, { untracked })
+  const { month, untracked: declared, topUpIds, includeScheduled = true, backtest = true, inferAway = true } = opts
+  // Coverage and history eligibility follow declared periods only; inferred time away just
+  // leaves the day counts.
+  const stats = opts.stats ?? monthlyStats(txs, { untracked: declared })
   const [mStart, mEnd] = monthBounds(month)
   const daysInMonth = Number(mEnd.slice(8, 10))
   const asOf = opts.asOf > mEnd ? mEnd : opts.asOf
+  const untracked = inferAway ? [...(declared ?? []), ...inferAwayPeriods(txs, asOf)] : declared
 
   const trackedDays = daysInMonth - untrackedDaysIn(mStart, mEnd, untracked)
   let elapsedDays = 0
@@ -155,7 +180,8 @@ export function projectMonth(txs: Transaction[], opts: ProjectionOptions): Proje
   const thresholdMonths = history.slice(-THRESHOLD_MONTHS).map((m) => m.month)
   const baselineMonths = history.slice(-BASELINE_MONTHS).map((m) => m.month)
   const threshold = largeThreshold(txs, thresholdMonths, topUpIds)
-  const isLumpy = (t: Transaction) => !!topUpIds?.has(t.categoryId) || -t.refAmountMinor >= threshold
+  // Top-ups are never lumpy: they recur every few days and the daily rate carries them.
+  const isLumpy = (t: Transaction) => !topUpIds?.has(t.categoryId) && -t.refAmountMinor >= threshold
 
   let spentMinor = 0
   let spentTodayMinor = 0
@@ -197,7 +223,8 @@ export function projectMonth(txs: Transaction[], opts: ProjectionOptions): Proje
     for (const m of baselineMonths) {
       everyday += baseEveryday.get(m) ?? 0
       lumpy += baseLumpy.get(m) ?? 0
-      days += Number(monthBounds(m)[1].slice(8, 10)) // history months have no untracked days
+      const [s0, e0] = monthBounds(m)
+      days += Number(e0.slice(8, 10)) - untrackedDaysIn(s0, e0, untracked) // history months have no declared untracked days; inferred time away still leaves
     }
     baselineDailyMinor = everyday / days
     // Median, not mean: one flight or deposit in one past month must not make every later month
@@ -244,11 +271,12 @@ export function projectMonth(txs: Transaction[], opts: ProjectionOptions): Proje
       const past = projectMonth(txs, {
         month: h.month,
         asOf: `${h.month}-${p2(Math.min(dom, last))}`,
-        untracked,
+        untracked: declared,
         topUpIds,
         stats,
         includeScheduled: false,
         backtest: false,
+        inferAway,
       })
       const actual = totals.get(h.month) ?? 0
       if (past.method === 'trend' && past.projectedMinor > 0) errors.push((actual - past.projectedMinor) / past.projectedMinor)

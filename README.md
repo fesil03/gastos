@@ -129,8 +129,17 @@ entries. Logic lives in `src/insights/projection.ts` (pure, tested in `projectio
   three fully tracked months' — weighted `elapsed / (elapsed + 7)` toward this month — and adds the
   large spends a typical (median) month still has ahead, so one exceptional purchase in the history
   doesn't leak into every month after it.
-- **One-offs aren't multiplied out.** Top-ups and any ticket at or above the 95th percentile of the
-  last six months' tickets (floor 200) count once. Rent on the 1st doesn't become 30× rent.
+- **One-offs aren't multiplied out.** Any ticket at or above the 95th percentile of the last six
+  months' tickets (floor 400) counts once. Rent on the 1st doesn't become 30× rent.
+- **Top-ups are everyday spend.** A card load is a lump on its day, but loads come back every few
+  days, so the daily rate carries them — they're never reserved as a "large spend still to come".
+- **Time away isn't zero spending.** A run of 4+ days with no entry at all, closed by a later entry,
+  leaves the day counts like a declared untracked period (projection only; coverage still follows
+  declared periods). A trip no longer drags the daily rate down. No lookahead: a run still open
+  today counts as ordinary days.
+- **Backtest it yourself.** `npx tsx scripts/backtest-projection.ts <export.md> [start:end …]` runs
+  the trend projection on every past month, every day, against a "paste into Claude" export
+  (kept outside the repo), and prints the error by part of the month.
 - **The band is earned.** The trend projection is re-run on each of the last six tracked months as
   of the same day of the month and compared with how they really ended; the median miss is the ±.
   Fewer than three such months → no band.
