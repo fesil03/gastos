@@ -42,7 +42,7 @@ export const SHRINK_DAYS = 7
  * leave the day counts the same way declared untracked days do, so a trip doesn't drag the daily
  * rate down. Only runs already closed by a later entry on or before asOf count — no lookahead.
  */
-export const AWAY_MIN_DAYS = 4
+export const AWAY_MIN_DAYS = 5
 
 export type ProjectionMethod = 'trend' | 'pace' | 'none'
 

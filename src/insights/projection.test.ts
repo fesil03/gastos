@@ -210,7 +210,9 @@ describe('time away', () => {
   })
 
   it(`reads ${AWAY_MIN_DAYS}+ empty days between entries as time away, fewer as quiet days`, () => {
-    const txs = [...withGap('2026-09', 10, 15), ...withGap('2026-08', 10, 12)]
+    // Six empty days in September: away. Four in August: a quiet stretch at home, still counted.
+    const txs = [...withGap('2026-09', 10, 15), ...withGap('2026-08', 10, 13)]
+    expect(AWAY_MIN_DAYS).toBe(5)
     expect(inferAwayPeriods(txs, '2026-09-30')).toEqual([{ start: '2026-09-10', end: '2026-09-15' }])
   })
 
@@ -225,9 +227,9 @@ describe('time away', () => {
   })
 
   it('takes a closed run this month out of the elapsed days, but never looks ahead', () => {
-    const oct = octoberTo10().filter((t) => !['04', '05', '06', '07'].includes(t.date.slice(8, 10)))
+    const oct = octoberTo10().filter((t) => !['04', '05', '06', '07', '08'].includes(t.date.slice(8, 10)))
     const q = projectMonth([...HISTORY, ...oct], { month: '2026-10', asOf: '2026-10-10', topUpIds })
-    expect(q.elapsedDays).toBe(6)
+    expect(q.elapsedDays).toBe(5)
     expect(q.currentDailyMinor).toBe(6_000)
     expect(q.remainingDays).toBe(21)
     // Still away and nothing logged since the 3rd: the run isn't closed, so the days still count.

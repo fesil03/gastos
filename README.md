@@ -133,7 +133,7 @@ entries. Logic lives in `src/insights/projection.ts` (pure, tested in `projectio
   months' tickets (floor 400) counts once. Rent on the 1st doesn't become 30× rent.
 - **Top-ups are everyday spend.** A card load is a lump on its day, but loads come back every few
   days, so the daily rate carries them — they're never reserved as a "large spend still to come".
-- **Time away isn't zero spending.** A run of 4+ days with no entry at all, closed by a later entry,
+- **Time away isn't zero spending.** A run of 5+ days with no entry at all, closed by a later entry,
   leaves the day counts like a declared untracked period (projection only; coverage still follows
   declared periods). A trip no longer drags the daily rate down. No lookahead: a run still open
   today counts as ordinary days.
